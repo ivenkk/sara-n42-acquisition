@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
+                    xmlns:ns2="http://www.technidata.com/ENVINET/SARA">
+  <SOAP-ENV:Body>
+    <ns2:DownloadFilesResponse>
+      <ns2:DownloadPackage>/tmp/sara_pkg_demo.zip</ns2:DownloadPackage>
+    </ns2:DownloadFilesResponse>
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>

@@ -1,0 +1,26 @@
+# 本地可用模板：已预填当前仪器 IP。部署前请按需修改用户名/密码。
+# 本文件已在 .gitignore 中忽略，请勿强制提交真实凭据。
+storage_root: ./data
+
+poll_interval_seconds: 300
+
+filename_contains: "5min"
+file_extension: ".n42"
+
+request_timeout_seconds: 20
+
+ui:
+  host: "127.0.0.1"
+  port: 8080
+
+instruments:
+  - name: "SARA-1"
+    host: "192.168.4.136"
+    port: 80
+    username: "admin"
+    password: "admin"
+  # - name: "SARA-2"
+  #   host: "192.168.4.137"
+  #   port: 80
+  #   username: "admin"
+  #   password: "admin"

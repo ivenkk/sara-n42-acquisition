@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
+                    xmlns:sara="http://www.technidata.com/ENVINET/SARA">
+  <SOAP-ENV:Body>
+    <sara:GetFileNamesResponse>
+      <sara:FileName>ignore_1h_spectrum.n42</sara:FileName>
+      <sara:FileName>SARA_20261120_120000_5min.n42</sara:FileName>
+      <sara:FileName>notes.txt</sara:FileName>
+      <sara:FileName>other_5min_backup.n42</sara:FileName>
+    </sara:GetFileNamesResponse>
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>

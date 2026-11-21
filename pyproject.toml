@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sara-n42-acquisition"
+version = "1.0.0"
+description = "SARA spectrometer N42 acquisition and local spectrum viewer"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.32.0",
+  "jinja2>=3.1.4",
+  "requests>=2.32.0",
+  "PyYAML>=6.0.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3.0", "httpx>=0.27.0"]
+
+[project.scripts]
+sara-n42 = "sara_n42.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["sara_n42*"]
+
+[tool.setuptools.package-data]
+sara_n42 = ["templates/*", "static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

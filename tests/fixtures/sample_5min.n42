@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<N42InstrumentData xmlns="http://physics.nist.gov/N42/2011/N42">
+  <Measurement>
+    <Spectrum>
+      <StartTime>2026-11-20T12:00:00</StartTime>
+      <ChannelData>0 1 2 8 20 40 30 15 5 1</ChannelData>
+      <Calibration>
+        <EnergyCalibration>
+          <Coefficient>0.0</Coefficient>
+          <Coefficient>1.5</Coefficient>
+        </EnergyCalibration>
+      </Calibration>
+    </Spectrum>
+  </Measurement>
+</N42InstrumentData>

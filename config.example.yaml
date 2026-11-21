@@ -1,0 +1,32 @@
+# 本地存储根目录（相对程序目录或绝对路径均可）
+storage_root: ./data
+
+# 轮询周期（秒），固定为 300
+poll_interval_seconds: 300
+
+# 只下载扩展名为 .n42、且文件名包含该关键字的文件
+filename_contains: "5min"
+file_extension: ".n42"
+
+# HTTP 请求超时（秒），建议 15–30
+request_timeout_seconds: 20
+
+# 本机展示页
+ui:
+  host: "127.0.0.1"
+  port: 8080
+
+# 可访问仪器列表：有几台就写几条
+# 请将 username / password 换成各仪器的实际 Digest 凭据，勿提交真实密码到公开仓库
+instruments:
+  - name: "SARA-1"
+    host: "192.168.4.136"
+    port: 80
+    username: "YOUR_USERNAME"
+    password: "YOUR_PASSWORD"
+  # 另外两台接上后，按同样格式追加即可，例如：
+  # - name: "SARA-2"
+  #   host: "192.168.4.137"
+  #   port: 80
+  #   username: "YOUR_USERNAME"
+  #   password: "YOUR_PASSWORD"
