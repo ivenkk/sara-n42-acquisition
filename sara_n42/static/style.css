@@ -48,6 +48,33 @@ body {
   font-size: 0.95rem;
 }
 
+.nav {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.nav-link {
+  text-decoration: none;
+  color: var(--muted);
+  padding: 0.4rem 0.85rem;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  font-size: 0.95rem;
+}
+
+.nav-link:hover {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.nav-link.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: #b7d7c7;
+  font-weight: 600;
+}
+
 .controls {
   display: flex;
   flex-wrap: wrap;
@@ -55,9 +82,13 @@ body {
   align-items: center;
 }
 
-.controls label { color: var(--muted); font-size: 0.9rem; }
+.controls label,
+.field label {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
 
-select, button {
+select, button, input[type="datetime-local"] {
   font: inherit;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -73,7 +104,12 @@ button {
   cursor: pointer;
 }
 
-button:hover { filter: brightness(1.05); }
+button:hover:not(:disabled) { filter: brightness(1.05); }
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 
 .auto {
   display: inline-flex;
@@ -82,82 +118,101 @@ button:hover { filter: brightness(1.05); }
   user-select: none;
 }
 
-.layout {
-  display: grid;
-  grid-template-columns: minmax(240px, 340px) 1fr;
-  gap: 1rem;
+.live-main {
   padding: 1rem 1.5rem 2rem;
   min-height: calc(100vh - 120px);
 }
 
-.file-panel, .chart-panel {
+.spectra-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr));
+  gap: 1rem;
+}
+
+.spectrum-card {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 10px;
   box-shadow: var(--shadow);
   padding: 1rem;
+  min-width: 0;
 }
 
-.file-panel h2 {
-  margin: 0 0 0.75rem;
-  font-size: 1.05rem;
-}
+.chart-meta { margin-bottom: 0.5rem; }
 
-#file-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  max-height: calc(100vh - 220px);
-  overflow: auto;
-}
-
-#file-list li {
-  padding: 0.65rem 0.7rem;
-  border-radius: 8px;
-  cursor: pointer;
-  border: 1px solid transparent;
-}
-
-#file-list li:hover { background: var(--accent-soft); }
-
-#file-list li.active {
-  background: var(--accent-soft);
-  border-color: #b7d7c7;
-}
-
-#file-list .name {
-  font-weight: 600;
-  word-break: break-all;
-}
-
-#file-list .time {
-  color: var(--muted);
+.inst-name {
+  color: var(--accent);
   font-size: 0.85rem;
-  margin-top: 0.2rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  margin-bottom: 0.25rem;
 }
 
-.chart-meta {
-  margin-bottom: 0.5rem;
-}
-
+.chart-title,
 #chart-title {
   font-weight: 650;
   word-break: break-all;
 }
 
+.chart-subtitle,
 #chart-subtitle {
   color: var(--muted);
   font-size: 0.92rem;
   margin-top: 0.15rem;
 }
 
+.chart,
 #chart {
   width: 100%;
-  height: min(62vh, 560px);
-  min-height: 320px;
+  height: min(48vh, 420px);
+  min-height: 280px;
 }
 
-.empty, .error { color: var(--muted); margin: 0.5rem 0; }
+.search-main {
+  padding: 1.25rem 1.5rem 2rem;
+  max-width: 880px;
+}
+
+.search-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.85rem 1rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 1.1rem 1.2rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.field.actions {
+  flex-direction: row;
+  align-items: flex-end;
+  gap: 0.6rem;
+}
+
+.search-result {
+  margin-top: 1.25rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1.1rem 1.2rem;
+}
+
+.count {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 650;
+}
+
+.muted { color: var(--muted); margin: 0; }
+
+.empty, .error, .empty-msg { color: var(--muted); margin: 0.5rem 0; }
 .error { color: var(--danger); }
 .hidden { display: none !important; }
 
@@ -167,11 +222,15 @@ button:hover { filter: brightness(1.05); }
   font-size: 0.85rem;
 }
 
-@media (max-width: 860px) {
-  .layout {
-    grid-template-columns: 1fr;
+@media (max-width: 700px) {
+  .top {
+    align-items: flex-start;
   }
-  #file-list {
-    max-height: 240px;
+  .field.actions {
+    flex-wrap: wrap;
+  }
+  .chart,
+  #chart {
+    min-height: 240px;
   }
 }

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>SARA N42 能谱展示</title>
+  <title>SARA N42 · 实时能谱</title>
   <link rel="stylesheet" href="/static/style.css" />
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
 </head>
@@ -11,19 +11,13 @@
   <header class="top">
     <div class="brand">
       <h1>SARA N42</h1>
-      <p>能谱采集与展示</p>
+      <p>实时能谱</p>
     </div>
+    <nav class="nav" aria-label="页面导航">
+      <a class="nav-link active" href="/">实时能谱</a>
+      <a class="nav-link" href="/search">检索下载</a>
+    </nav>
     <div class="controls">
-      <label for="instrument">仪器</label>
-      <select id="instrument" aria-label="选择仪器">
-        {% for inst in instruments %}
-        <option value="{{ inst.host }}" {% if inst.host == default_host %}selected{% endif %}>
-          {{ inst.name }} ({{ inst.host }})
-        </option>
-        {% else %}
-        <option value="" disabled selected>未配置仪器</option>
-        {% endfor %}
-      </select>
       <button type="button" id="btn-refresh">刷新</button>
       <label class="auto">
         <input type="checkbox" id="auto-refresh" checked />
@@ -32,20 +26,9 @@
     </div>
   </header>
 
-  <main class="layout">
-    <section class="file-panel" aria-label="文件列表">
-      <h2>已下载文件</h2>
-      <p id="file-empty" class="empty hidden">该仪器尚无符合规则的本地文件。</p>
-      <ul id="file-list"></ul>
-    </section>
-    <section class="chart-panel" aria-label="能谱曲线">
-      <div class="chart-meta">
-        <div id="chart-title">请选择文件</div>
-        <div id="chart-subtitle"></div>
-      </div>
-      <div id="chart" role="img" aria-label="能谱曲线图"></div>
-      <p id="chart-error" class="error hidden"></p>
-    </section>
+  <main class="live-main" aria-label="各仪器最新能谱">
+    <p id="live-empty" class="empty hidden">未配置仪器。请编辑 config.yaml 后重启。</p>
+    <div id="spectra-grid" class="spectra-grid"></div>
   </main>
 
   <footer class="foot">
@@ -55,7 +38,7 @@
   <script>
     window.SARA_UI = {
       pollIntervalSeconds: {{ poll_interval_seconds | int }},
-      defaultHost: {{ default_host | tojson }},
+      page: "live",
     };
   </script>
   <script src="/static/app.js"></script>

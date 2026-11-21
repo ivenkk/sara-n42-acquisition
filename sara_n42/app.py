@@ -1,18 +1,21 @@
-"""FastAPI UI: file list + spectrum chart."""
+"""FastAPI UI: live latest spectra + search/download."""
 
 from __future__ import annotations
 
+import io
 import logging
+import zipfile
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .config import AppConfig, load_config
-from .n42_parser import parse_n42, sort_key_measurement_time
+from .config import AppConfig, InstrumentConfig, load_config
+from .n42_parser import SpectrumData, parse_n42, sort_key_measurement_time
 from .scheduler import AcquisitionScheduler
 from .storage import ensure_storage_layout, instrument_dir, list_local_n42
 
@@ -49,19 +52,31 @@ def create_app(
     static_dir = PACKAGE_DIR / "static"
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-    @app.get("/", response_class=HTMLResponse)
-    def index(request: Request) -> HTMLResponse:
+    def _page_context(*, active: str) -> dict:
         instruments = [
             {"name": i.name, "host": i.host} for i in cfg.instruments
         ]
+        return {
+            "instruments": instruments,
+            "poll_interval_seconds": cfg.poll_interval_seconds,
+            "default_host": instruments[0]["host"] if instruments else "",
+            "active_page": active,
+        }
+
+    @app.get("/", response_class=HTMLResponse)
+    def index(request: Request) -> HTMLResponse:
         return TEMPLATES.TemplateResponse(
             request,
             "index.html",
-            {
-                "instruments": instruments,
-                "poll_interval_seconds": cfg.poll_interval_seconds,
-                "default_host": instruments[0]["host"] if instruments else "",
-            },
+            _page_context(active="live"),
+        )
+
+    @app.get("/search", response_class=HTMLResponse)
+    def search_page(request: Request) -> HTMLResponse:
+        return TEMPLATES.TemplateResponse(
+            request,
+            "search.html",
+            _page_context(active="search"),
         )
 
     @app.get("/api/instruments")
@@ -79,7 +94,6 @@ def create_app(
         if inst is None:
             raise HTTPException(status_code=404, detail=f"未知仪器: {host}")
         files = list_local_n42(cfg, inst)
-        # Sort by measurement time descending
         files_sorted = sorted(files, key=sort_key_measurement_time, reverse=True)
         items = []
         for path in files_sorted:
@@ -100,6 +114,32 @@ def create_app(
             }
         )
 
+    @app.get("/api/spectra/latest")
+    def api_spectra_latest() -> JSONResponse:
+        """Latest spectrum (by measurement time) for every configured instrument."""
+        items = []
+        for inst in cfg.instruments:
+            latest = _latest_file(cfg, inst)
+            if latest is None:
+                items.append(
+                    {
+                        "host": inst.host,
+                        "name": inst.name,
+                        "empty": True,
+                        "spectrum": None,
+                    }
+                )
+                continue
+            items.append(
+                {
+                    "host": inst.host,
+                    "name": inst.name,
+                    "empty": False,
+                    "spectrum": _spectrum_payload(latest),
+                }
+            )
+        return JSONResponse({"instruments": items})
+
     @app.get("/api/spectrum")
     def api_spectrum(
         host: str = Query(...),
@@ -108,27 +148,67 @@ def create_app(
         inst = _find_instrument(cfg, host)
         if inst is None:
             raise HTTPException(status_code=404, detail=f"未知仪器: {host}")
-        # Prevent path traversal
         safe_name = Path(filename).name
         path = instrument_dir(cfg, inst) / safe_name
         if not path.is_file():
             raise HTTPException(status_code=404, detail=f"文件不存在: {safe_name}")
         if not cfg.matches_filename(safe_name):
             raise HTTPException(status_code=400, detail="文件不符合过滤规则")
+        return JSONResponse(_spectrum_payload(path))
 
-        data = parse_n42(path)
-        payload = {
-            "filename": data.filename,
-            "measurement_time": data.measurement_time_display,
-            "measurement_time_source": data.measurement_time_source,
-            "x_unit": data.x_unit,
-            "x_label": data.x_label,
-            "y_label": data.y_label,
-            "channels": data.channels,
-            "counts": data.counts,
-            "error": data.error,
-        }
-        return JSONResponse(payload)
+    @app.get("/api/search")
+    def api_search(
+        start: str = Query(..., description="测量时间起 (ISO)"),
+        end: str = Query(..., description="测量时间止 (ISO)"),
+        host: str | None = Query(None, description="可选仪器 IP；空=全部"),
+    ) -> JSONResponse:
+        start_dt, end_dt = _parse_range(start, end)
+        matches = _search_matches(cfg, host=host, start=start_dt, end=end_dt)
+        by_host: dict[str, int] = {}
+        for inst, _path, _data in matches:
+            by_host[inst.host] = by_host.get(inst.host, 0) + 1
+        return JSONResponse(
+            {
+                "count": len(matches),
+                "by_host": by_host,
+                "start": start_dt.isoformat(sep=" ", timespec="seconds"),
+                "end": end_dt.isoformat(sep=" ", timespec="seconds"),
+                "host": host,
+            }
+        )
+
+    @app.get("/api/search/download")
+    def api_search_download(
+        start: str = Query(...),
+        end: str = Query(...),
+        host: str | None = Query(None),
+    ) -> StreamingResponse:
+        start_dt, end_dt = _parse_range(start, end)
+        matches = _search_matches(cfg, host=host, start=start_dt, end=end_dt)
+        if not matches:
+            raise HTTPException(status_code=404, detail="没有符合条件的文件")
+
+        buf = io.BytesIO()
+        used_names: set[str] = set()
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for inst, path, _data in matches:
+                arcname = f"{inst.host}/{path.name}"
+                if arcname in used_names:
+                    # Extremely unlikely same host+name; still avoid collision.
+                    arcname = f"{inst.host}/{path.stem}_{len(used_names)}{path.suffix}"
+                used_names.add(arcname)
+                zf.write(path, arcname=arcname)
+        buf.seek(0)
+
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"sara_n42_{stamp}.zip"
+        return StreamingResponse(
+            buf,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
 
     @app.get("/api/status")
     def api_status() -> JSONResponse:
@@ -149,8 +229,100 @@ def create_app(
     return app
 
 
-def _find_instrument(cfg: AppConfig, host: str):
+def _find_instrument(cfg: AppConfig, host: str) -> InstrumentConfig | None:
     for inst in cfg.instruments:
         if inst.host == host:
             return inst
     return None
+
+
+def _latest_file(cfg: AppConfig, inst: InstrumentConfig) -> Path | None:
+    files = list_local_n42(cfg, inst)
+    if not files:
+        return None
+    return sorted(files, key=sort_key_measurement_time, reverse=True)[0]
+
+
+def _spectrum_payload(path: Path) -> dict:
+    data = parse_n42(path)
+    return {
+        "filename": data.filename,
+        "measurement_time": data.measurement_time_display,
+        "measurement_time_source": data.measurement_time_source,
+        "x_unit": data.x_unit,
+        "x_label": data.x_label,
+        "y_label": data.y_label,
+        "channels": data.channels,
+        "counts": data.counts,
+        "error": data.error,
+    }
+
+
+def _naive(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        return dt.replace(tzinfo=None)
+    return dt
+
+
+def _parse_query_dt(value: str) -> datetime:
+    text = (value or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="时间参数不能为空")
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    candidates = [text, text.replace(" ", "T", 1)]
+    for cand in candidates:
+        try:
+            return _naive(datetime.fromisoformat(cand))  # type: ignore[return-value]
+        except ValueError:
+            continue
+    for fmt in (
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d %H:%M:%S",
+    ):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    raise HTTPException(status_code=400, detail=f"无法解析时间: {value}")
+
+
+def _parse_range(start: str, end: str) -> tuple[datetime, datetime]:
+    start_dt = _parse_query_dt(start)
+    end_dt = _parse_query_dt(end)
+    if end_dt < start_dt:
+        raise HTTPException(status_code=400, detail="结束时间不能早于开始时间")
+    return start_dt, end_dt
+
+
+def _search_matches(
+    cfg: AppConfig,
+    *,
+    host: str | None,
+    start: datetime,
+    end: datetime,
+) -> list[tuple[InstrumentConfig, Path, SpectrumData]]:
+    if host:
+        inst = _find_instrument(cfg, host)
+        if inst is None:
+            raise HTTPException(status_code=404, detail=f"未知仪器: {host}")
+        instruments: tuple[InstrumentConfig, ...] | list[InstrumentConfig] = (inst,)
+    else:
+        instruments = cfg.instruments
+
+    matches: list[tuple[InstrumentConfig, Path, SpectrumData]] = []
+    for inst in instruments:
+        for path in list_local_n42(cfg, inst):
+            data = parse_n42(path)
+            mt = _naive(data.measurement_time)
+            if mt is None:
+                # Unknown measurement time cannot satisfy a time-range filter.
+                continue
+            if mt < start or mt > end:
+                continue
+            matches.append((inst, path, data))
+    return matches
