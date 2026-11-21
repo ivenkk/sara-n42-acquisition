@@ -2,6 +2,8 @@
 
 在可访问仪器内网的 Windows 电脑上运行：按配置轮询一台或多台 Envinet SARA 能谱仪，每 5 分钟增量下载 Spectra Folder 中文件名包含 `5min` 的 `.n42` 文件，并在本机页面展示各仪器最新能谱、按时间检索并打包下载。
 
+**运维使用手册（中文）：** [docs/使用手册.md](docs/使用手册.md)
+
 > **重要：** 云端开发环境通常无法访问 `192.168.4.x` 仪器局域网。SOAP 契约已按管理页脚本 + 实机联调实现；**实机联调必须在可访问仪器的内网 PC 上完成**。实机 `GetFileNames` 返回重复的 `<FilesFound>`；`DownloadPackage` 为 `/tmp/n42Files.tgz`（gzip tar，经 `/root/tmp/...` 下载），不是 zip。
 
 ## 环境要求
