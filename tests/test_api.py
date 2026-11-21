@@ -74,12 +74,40 @@ def test_api_spectra_latest(sample_config: Path, fixtures_dir: Path):
     items = r.json()["instruments"]
     assert len(items) == 2
     by_host = {i["host"]: i for i in items}
+    assert by_host["192.168.4.136"]["status"] == "online"
     assert by_host["192.168.4.136"]["empty"] is False
     assert by_host["192.168.4.136"]["spectrum"]["filename"] == "demo_5min.n42"
     assert by_host["192.168.4.136"]["spectrum"]["dose_rate"] == 9.550e-02
     assert by_host["192.168.4.136"]["spectrum"]["dose_rate_unit"] == "uSv/h"
     assert by_host["192.168.4.136"]["spectrum"]["dose_rate_display"] == "9.550e-02 uSv/h"
+    assert by_host["192.168.4.137"]["status"] == "offline"
     assert by_host["192.168.4.137"]["empty"] is True
+    assert by_host["192.168.4.137"]["spectrum"] is None
+
+
+def test_api_spectra_latest_offline_when_poll_fails(
+    sample_config: Path, fixtures_dir: Path
+):
+    """Poll failure marks instrument offline even if a local file exists."""
+    cfg = load_config(sample_config)
+    _seed_sample(cfg, fixtures_dir, "192.168.4.136", "demo_5min.n42")
+    _seed_sample(cfg, fixtures_dir, "192.168.4.137", "other_5min.n42")
+
+    app = create_app(cfg, start_scheduler=False)
+    # Simulate a completed poll cycle where .137 is unreachable.
+    app.state.scheduler.last_cycle_at = 1.0
+    app.state.scheduler.last_ok_hosts = {"192.168.4.136"}
+    app.state.scheduler.last_errors = {"192.168.4.137": "instrument down"}
+
+    client = TestClient(app)
+    r = client.get("/api/spectra/latest")
+    assert r.status_code == 200
+    by_host = {i["host"]: i for i in r.json()["instruments"]}
+    assert by_host["192.168.4.136"]["status"] == "online"
+    assert by_host["192.168.4.136"]["spectrum"] is not None
+    assert by_host["192.168.4.137"]["status"] == "offline"
+    assert by_host["192.168.4.137"]["spectrum"] is None
+    assert by_host["192.168.4.137"]["error"] == "instrument down"
 
 
 def test_api_search_count_and_zip(sample_config: Path, fixtures_dir: Path):

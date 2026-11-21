@@ -58,6 +58,10 @@ def test_scheduler_isolates_instrument_failure(app_config, tmp_path: Path):
     assert good.is_file()
     assert not (app_config.storage_root / "192.168.4.136" / "skip_1h.n42").exists()
     assert "192.168.4.137" in sched.last_errors
+    assert "192.168.4.136" in sched.last_ok_hosts
+    assert "192.168.4.137" not in sched.last_ok_hosts
+    assert sched.is_reachable("192.168.4.136") is True
+    assert sched.is_reachable("192.168.4.137") is False
 
     # second run: no overwrite / no re-download needed
     before = good.read_bytes()

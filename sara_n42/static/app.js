@@ -96,7 +96,7 @@
     );
   }
 
-  function renderEmpty(card, host, name) {
+  function renderOffline(card, host) {
     const chart = charts.get(host);
     const title = card.querySelector(".chart-title");
     const subtitle = card.querySelector(".chart-subtitle");
@@ -104,13 +104,20 @@
     const err = card.querySelector(".error");
     const chartEl = card.querySelector(".chart");
 
-    title.textContent = "暂无能谱";
+    card.classList.add("is-offline");
+    title.textContent = "不在线";
     subtitle.textContent = "";
     err.classList.add("hidden");
     emptyMsg.classList.remove("hidden");
-    emptyMsg.textContent = `${name}（${host}）尚无符合规则的本地文件。`;
+    emptyMsg.textContent = "不在线";
     chartEl.classList.add("hidden");
-    if (chart) chart.clear();
+    if (chart) {
+      try {
+        chart.clear();
+      } catch (_) {
+        /* chart may be disposed during refresh */
+      }
+    }
   }
 
   async function loadLatest() {
@@ -133,16 +140,19 @@
 
     liveEmpty.classList.add("hidden");
     const seen = new Set();
-    let withData = 0;
+    let onlineCount = 0;
 
     for (const item of items) {
       seen.add(item.host);
       const card = ensureCard(item.host, item.name);
-      if (item.empty || !item.spectrum) {
-        renderEmpty(card, item.host, item.name);
+      const offline =
+        item.status === "offline" || item.empty || !item.spectrum;
+      if (offline) {
+        renderOffline(card, item.host);
       } else {
+        card.classList.remove("is-offline");
         renderSpectrum(card, item.host, item.spectrum);
-        withData += 1;
+        onlineCount += 1;
       }
     }
 
@@ -163,7 +173,7 @@
       chart.resize();
     }
 
-    setStatus(`已更新：${withData}/${items.length} 台有最新能谱`);
+    setStatus(`已更新：${onlineCount}/${items.length} 台在线`);
   }
 
   btnRefresh.addEventListener("click", () => loadLatest());

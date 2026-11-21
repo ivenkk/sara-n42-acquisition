@@ -45,6 +45,18 @@ class AcquisitionScheduler:
         self._lock = threading.Lock()
         self.last_cycle_at: float | None = None
         self.last_errors: dict[str, str] = {}
+        # Hosts that completed the last poll cycle without error.
+        self.last_ok_hosts: set[str] = set()
+
+    def is_reachable(self, host: str) -> bool | None:
+        """
+        Last-poll reachability for an instrument host.
+
+        Returns True/False after at least one cycle; None if never polled yet.
+        """
+        if self.last_cycle_at is None:
+            return None
+        return host in self.last_ok_hosts and host not in self.last_errors
 
     def start(self) -> None:
         ensure_storage_layout(self.config)
@@ -87,9 +99,11 @@ class AcquisitionScheduler:
                 len(self.config.instruments),
             )
             errors: dict[str, str] = {}
+            ok_hosts: set[str] = set()
             for inst in self.config.instruments:
                 try:
                     self._process_instrument(inst)
+                    ok_hosts.add(inst.host)
                 except Exception as exc:  # noqa: BLE001
                     msg = str(exc)
                     errors[inst.host] = msg
@@ -107,6 +121,7 @@ class AcquisitionScheduler:
                         detail=msg,
                     )
             self.last_errors = errors
+            self.last_ok_hosts = ok_hosts
             self.last_cycle_at = time.time()
             logger.info("本轮检查结束")
 

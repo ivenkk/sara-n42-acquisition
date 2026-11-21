@@ -116,17 +116,25 @@ def create_app(
 
     @app.get("/api/spectra/latest")
     def api_spectra_latest() -> JSONResponse:
-        """Latest spectrum (by measurement time) for every configured instrument."""
+        """Latest spectrum (by measurement time) for every configured instrument.
+
+        Always returns one entry per configured instrument. Offline instruments
+        (poll failed, unreachable, or no usable local latest spectrum) have
+        status "offline" and no spectrum payload for the live UI.
+        """
         items = []
         for inst in cfg.instruments:
             latest = _latest_file(cfg, inst)
-            if latest is None:
+            status = _live_status(scheduler, inst.host, latest)
+            if status == "offline":
                 items.append(
                     {
                         "host": inst.host,
                         "name": inst.name,
+                        "status": "offline",
                         "empty": True,
                         "spectrum": None,
+                        "error": scheduler.last_errors.get(inst.host),
                     }
                 )
                 continue
@@ -134,8 +142,10 @@ def create_app(
                 {
                     "host": inst.host,
                     "name": inst.name,
+                    "status": "online",
                     "empty": False,
-                    "spectrum": _spectrum_payload(latest),
+                    "spectrum": _spectrum_payload(latest),  # type: ignore[arg-type]
+                    "error": None,
                 }
             )
         return JSONResponse({"instruments": items})
@@ -246,6 +256,27 @@ def _latest_file(cfg: AppConfig, inst: InstrumentConfig) -> Path | None:
     if not files:
         return None
     return sorted(files, key=sort_key_measurement_time, reverse=True)[0]
+
+
+def _live_status(
+    scheduler: AcquisitionScheduler,
+    host: str,
+    latest: Path | None,
+) -> str:
+    """
+    online | offline for the live spectra page.
+
+    Prefer last-poll reachability from the scheduler when a cycle has run:
+    a failed probe marks the instrument offline (stale local files are hidden).
+    When no cycle has run yet, fall back to presence of a local latest spectrum.
+    Reachable hosts with no usable local latest file are still offline in the UI.
+    """
+    reachable = scheduler.is_reachable(host)
+    if reachable is False:
+        return "offline"
+    if latest is None:
+        return "offline"
+    return "online"
 
 
 def _spectrum_payload(path: Path) -> dict:

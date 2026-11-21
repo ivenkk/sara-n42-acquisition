@@ -238,6 +238,24 @@ button:disabled {
 .error { color: var(--danger); }
 .hidden { display: none !important; }
 
+.spectrum-card.is-offline .chart-title {
+  color: var(--muted);
+  font-weight: 650;
+  letter-spacing: 0.06em;
+}
+
+.spectrum-card.is-offline .empty-msg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: min(48vh, 280px);
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
 .foot {
   padding: 0.5rem 1.5rem 1rem;
   color: var(--muted);
