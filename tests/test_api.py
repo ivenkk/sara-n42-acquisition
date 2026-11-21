@@ -110,6 +110,57 @@ def test_api_spectra_latest_offline_when_poll_fails(
     assert by_host["192.168.4.137"]["error"] == "instrument down"
 
 
+def test_api_spectra_latest_follows_config_reload(
+    sample_config: Path, fixtures_dir: Path
+):
+    """Hot-reload shrinks/grows the live panel list without restarting the app."""
+    import time
+
+    import yaml
+
+    cfg = load_config(sample_config)
+    _seed_sample(cfg, fixtures_dir, "192.168.4.136", "demo_5min.n42")
+
+    app = create_app(cfg, start_scheduler=False, watch_config=False)
+    client = TestClient(app)
+
+    r = client.get("/api/spectra/latest")
+    assert r.status_code == 200
+    assert len(r.json()["instruments"]) == 2
+
+    raw = yaml.safe_load(sample_config.read_text(encoding="utf-8"))
+    raw["instruments"] = [
+        {
+            "name": "SARA-1",
+            "host": "192.168.4.136",
+            "port": 80,
+            "username": "admin",
+            "password": "admin",
+        }
+    ]
+    time.sleep(0.05)
+    sample_config.write_text(yaml.safe_dump(raw, allow_unicode=True), encoding="utf-8")
+    try:
+        import os
+
+        now = time.time()
+        os.utime(sample_config, (now + 1, now + 1))
+    except OSError:
+        pass
+
+    assert app.state.config_store.check_and_reload() is True
+    assert len(app.state.scheduler.config.instruments) == 1
+
+    r = client.get("/api/spectra/latest")
+    assert r.status_code == 200
+    items = r.json()["instruments"]
+    assert len(items) == 1
+    assert items[0]["host"] == "192.168.4.136"
+
+    r = client.get("/api/instruments")
+    assert len(r.json()) == 1
+
+
 def test_api_search_count_and_zip(sample_config: Path, fixtures_dir: Path):
     cfg = load_config(sample_config)
     _seed_sample(cfg, fixtures_dir, "192.168.4.136", "demo_5min.n42")

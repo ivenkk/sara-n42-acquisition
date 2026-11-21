@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .config import AppConfig, InstrumentConfig, load_config
+from .config import AppConfig, ConfigStore, InstrumentConfig, load_config
 from .n42_parser import SpectrumData, parse_n42, sort_key_measurement_time
 from .scheduler import AcquisitionScheduler
 from .storage import ensure_storage_layout, find_local_n42, list_local_n42
@@ -29,30 +29,49 @@ def create_app(
     config: AppConfig | None = None,
     *,
     start_scheduler: bool = True,
+    watch_config: bool = True,
 ) -> FastAPI:
-    cfg = config or load_config()
-    ensure_storage_layout(cfg)
-    scheduler = AcquisitionScheduler(cfg)
+    initial = config or load_config()
+    ensure_storage_layout(initial)
+    store = ConfigStore(initial)
+    scheduler = AcquisitionScheduler(initial)
+    store.on_reload(scheduler.update_config)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        if watch_config:
+            store.start_watching()
         if start_scheduler:
             scheduler.start()
         yield
         scheduler.stop()
+        store.stop_watching()
 
     app = FastAPI(
         title="SARA N42 采集与展示",
         version="1.0.0",
         lifespan=lifespan,
     )
-    app.state.config = cfg
+    app.state.config_store = store
     app.state.scheduler = scheduler
+
+    def current_config() -> AppConfig:
+        """Always the live config (hot-reloaded), never a startup snapshot."""
+        return store.config
+
+    # Back-compat for tests / callers that read app.state.config
+    app.state.config = initial
+
+    def _sync_state_config(new_cfg: AppConfig) -> None:
+        app.state.config = new_cfg
+
+    store.on_reload(_sync_state_config)
 
     static_dir = PACKAGE_DIR / "static"
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     def _page_context(*, active: str) -> dict:
+        cfg = current_config()
         instruments = [
             {"name": i.name, "host": i.host} for i in cfg.instruments
         ]
@@ -81,6 +100,7 @@ def create_app(
 
     @app.get("/api/instruments")
     def api_instruments() -> JSONResponse:
+        cfg = current_config()
         return JSONResponse(
             [
                 {"name": i.name, "host": i.host, "port": i.port}
@@ -90,6 +110,7 @@ def create_app(
 
     @app.get("/api/files")
     def api_files(host: str = Query(..., description="仪器 IP")) -> JSONResponse:
+        cfg = current_config()
         inst = _find_instrument(cfg, host)
         if inst is None:
             raise HTTPException(status_code=404, detail=f"未知仪器: {host}")
@@ -122,6 +143,7 @@ def create_app(
         (poll failed, unreachable, or no usable local latest spectrum) have
         status "offline" and no spectrum payload for the live UI.
         """
+        cfg = current_config()
         items = []
         for inst in cfg.instruments:
             latest = _latest_file(cfg, inst)
@@ -155,6 +177,7 @@ def create_app(
         host: str = Query(...),
         filename: str = Query(...),
     ) -> JSONResponse:
+        cfg = current_config()
         inst = _find_instrument(cfg, host)
         if inst is None:
             raise HTTPException(status_code=404, detail=f"未知仪器: {host}")
@@ -172,6 +195,7 @@ def create_app(
         end: str = Query(..., description="测量时间止 (ISO)"),
         host: str | None = Query(None, description="可选仪器 IP；空=全部"),
     ) -> JSONResponse:
+        cfg = current_config()
         start_dt, end_dt = _parse_range(start, end)
         matches = _search_matches(cfg, host=host, start=start_dt, end=end_dt)
         by_host: dict[str, int] = {}
@@ -193,6 +217,7 @@ def create_app(
         end: str = Query(...),
         host: str | None = Query(None),
     ) -> StreamingResponse:
+        cfg = current_config()
         start_dt, end_dt = _parse_range(start, end)
         matches = _search_matches(cfg, host=host, start=start_dt, end=end_dt)
         if not matches:
@@ -227,6 +252,7 @@ def create_app(
 
     @app.get("/api/status")
     def api_status() -> JSONResponse:
+        cfg = current_config()
         return JSONResponse(
             {
                 "instruments": [i.host for i in cfg.instruments],

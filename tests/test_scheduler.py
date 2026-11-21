@@ -86,3 +86,42 @@ def test_scheduler_skips_existing(app_config):
     sched.run_once()
     assert existing.read_bytes() == b"old"
     assert (dest / "new_5min.n42").is_file()
+
+
+def test_scheduler_uses_reloaded_instruments(app_config, sample_config: Path):
+    from sara_n42.config import load_config
+
+    calls: list[str] = []
+
+    def factory(inst):
+        calls.append(inst.host)
+        return FakeClient(inst, names=[])
+
+    sched = AcquisitionScheduler(app_config, client_factory=factory)
+    sched.run_once()
+    assert set(calls) == {"192.168.4.136", "192.168.4.137"}
+
+    # Shrink instrument list via a reloaded AppConfig.
+    import yaml
+
+    raw = yaml.safe_load(sample_config.read_text(encoding="utf-8"))
+    raw["instruments"] = [
+        {
+            "name": "Only",
+            "host": "192.168.4.136",
+            "port": 80,
+            "username": "admin",
+            "password": "admin",
+        }
+    ]
+    sample_config.write_text(yaml.safe_dump(raw, allow_unicode=True), encoding="utf-8")
+    new_cfg = load_config(sample_config)
+    # Keep the same storage_root as the running scheduler.
+    from dataclasses import replace
+
+    new_cfg = replace(new_cfg, storage_root=app_config.storage_root)
+
+    calls.clear()
+    sched.update_config(new_cfg)
+    sched.run_once()
+    assert calls == ["192.168.4.136"]

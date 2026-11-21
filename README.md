@@ -42,7 +42,9 @@ pip install -r requirements.txt
    - 按实际修改 `username` / `password`（HTTP Digest）
    - 增加第二、三台时，在 `instruments` 下追加条目即可，**无需改代码**
 
-3. `config.example.yaml` 中密码为占位符，适合提交到仓库；`config.yaml` 为本地可用模板。请勿把真实密码推到公开仓库。
+3. **热加载（无需重启进程）：** 保存对 `config.yaml` 的修改后，运行中的程序会按文件修改时间自动重载仪器列表与轮询相关设置。刷新浏览器页面（或等下一轮 API 轮询）后，实时能谱面板数量会与新配置一致。YAML 无效时保留上一份有效配置并打 ERROR 日志。绑定地址 `ui.host` / `ui.port` 仍需重启进程才会生效。
+
+4. `config.example.yaml` 中密码为占位符，适合提交到仓库；`config.yaml` 为本地可用模板。请勿把真实密码推到公开仓库。
 
 主要字段：
 
