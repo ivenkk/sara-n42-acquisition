@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<N42InstrumentData xmlns="http://physics.nist.gov/N42/2011/N42">
+<N42InstrumentData xmlns="http://physics.nist.gov/N42/2011/N42"
+  xmlns:envinet="http://www.technidata.com/ENVINET"
+  xmlns:sara="http://www.technidata.com/SARA">
   <Measurement>
     <Spectrum>
       <StartTime>2026-11-20T12:00:00</StartTime>
@@ -11,5 +13,19 @@
         </EnergyCalibration>
       </Calibration>
     </Spectrum>
+    <CountDoseData>
+      <StartTime>2026-11-20T12:00:00</StartTime>
+      <SampleRealTime>PT300S</SampleRealTime>
+      <DoseRate Units="uSv" envinet:TimeRelation="h" envinet:Offset="0.000">9.550e-02</DoseRate>
+      <GrossCounts>152128</GrossCounts>
+    </CountDoseData>
+    <AnalysisResults>
+      <NuclideAnalysis>
+        <Nuclide>
+          <NuclideName>K-40</NuclideName>
+          <sara:DoseRate Units="uSv" envinet:TimeRelation="h">2.332e-02 1.990e-02 2.674e-02</sara:DoseRate>
+        </Nuclide>
+      </NuclideAnalysis>
+    </AnalysisResults>
   </Measurement>
 </N42InstrumentData>

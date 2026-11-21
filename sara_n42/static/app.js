@@ -52,7 +52,8 @@
     chartEl.classList.remove("hidden");
 
     title.textContent = spectrum.filename;
-    subtitle.textContent = `测量时间：${spectrum.measurement_time}`;
+    const doseDisplay = spectrum.dose_rate_display || "未知";
+    subtitle.textContent = `测量时间：${spectrum.measurement_time}　剂量率：${doseDisplay}`;
 
     if (spectrum.error) {
       chart.clear();
