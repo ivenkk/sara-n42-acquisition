@@ -50,7 +50,11 @@ def test_scheduler_isolates_instrument_failure(app_config, tmp_path: Path):
 
     assert "192.168.4.136" in calls
     assert "192.168.4.137" in calls
-    good = app_config.storage_root / "192.168.4.136" / "keep_5min.n42"
+    # Unparseable payload → download-time local month folder
+    from datetime import datetime
+
+    month = datetime.now().astimezone().strftime("%Y-%m")
+    good = app_config.storage_root / "192.168.4.136" / month / "keep_5min.n42"
     assert good.is_file()
     assert not (app_config.storage_root / "192.168.4.136" / "skip_1h.n42").exists()
     assert "192.168.4.137" in sched.last_errors
@@ -63,7 +67,10 @@ def test_scheduler_isolates_instrument_failure(app_config, tmp_path: Path):
 
 def test_scheduler_skips_existing(app_config):
     host = "192.168.4.136"
-    dest = app_config.storage_root / host
+    from datetime import datetime
+
+    month = datetime.now().astimezone().strftime("%Y-%m")
+    dest = app_config.storage_root / host / month
     dest.mkdir(parents=True)
     existing = dest / "already_5min.n42"
     existing.write_bytes(b"old")

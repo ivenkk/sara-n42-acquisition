@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import tempfile
 import threading
 import time
+from pathlib import Path
 from typing import Callable
 
 from .config import AppConfig
@@ -12,8 +14,8 @@ from .soap_client import SaraSoapClient, SaraSoapError
 from .storage import (
     append_download_log,
     ensure_storage_layout,
-    instrument_dir,
     local_basenames,
+    place_downloaded_n42,
 )
 
 logger = logging.getLogger(__name__)
@@ -137,38 +139,44 @@ class AcquisitionScheduler:
         if not todo:
             return
 
-        dest = instrument_dir(self.config, inst)
-        try:
-            saved = client.download_files(todo, dest)
-        except SaraSoapError as exc:
-            append_download_log(
-                self.config,
-                host=inst.host,
-                filename=",".join(todo),
-                ok=False,
-                detail=str(exc),
-            )
-            raise
+        # Stage into a temp dir, then move each file into data/<ip>/YYYY-MM/.
+        with tempfile.TemporaryDirectory(prefix="sara_n42_dl_") as tmp:
+            staging = Path(tmp)
+            try:
+                saved = client.download_files(todo, staging)
+            except SaraSoapError as exc:
+                append_download_log(
+                    self.config,
+                    host=inst.host,
+                    filename=",".join(todo),
+                    ok=False,
+                    detail=str(exc),
+                )
+                raise
 
-        saved_names = {p.name for p in saved}
+            placed_by_name: dict[str, Path] = {}
+            for staged in saved:
+                final = place_downloaded_n42(self.config, inst, staged)
+                placed_by_name[final.name] = final
+
+        existing_after = local_basenames(self.config, inst)
         for name in todo:
-            if name in saved_names:
+            if name in placed_by_name:
+                final = placed_by_name[name]
                 append_download_log(
                     self.config, host=inst.host, filename=name, ok=True
                 )
-                logger.info("已保存 %s → %s", name, dest / name)
+                logger.info("已保存 %s → %s", name, final)
+            elif name in existing_after:
+                logger.info("文件已存在，跳过 %s", name)
             else:
-                # Already existed or not present in package
-                if (dest / name).exists():
-                    logger.info("文件已存在，跳过 %s", name)
-                else:
-                    append_download_log(
-                        self.config,
-                        host=inst.host,
-                        filename=name,
-                        ok=False,
-                        detail="包中未找到该文件",
-                    )
-                    logger.error(
-                        "下载包中未找到 %s @ %s", name, inst.host
-                    )
+                append_download_log(
+                    self.config,
+                    host=inst.host,
+                    filename=name,
+                    ok=False,
+                    detail="包中未找到该文件",
+                )
+                logger.error(
+                    "下载包中未找到 %s @ %s", name, inst.host
+                )

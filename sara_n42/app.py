@@ -17,7 +17,7 @@ from fastapi.templating import Jinja2Templates
 from .config import AppConfig, InstrumentConfig, load_config
 from .n42_parser import SpectrumData, parse_n42, sort_key_measurement_time
 from .scheduler import AcquisitionScheduler
-from .storage import ensure_storage_layout, instrument_dir, list_local_n42
+from .storage import ensure_storage_layout, find_local_n42, list_local_n42
 
 logger = logging.getLogger(__name__)
 
@@ -149,11 +149,11 @@ def create_app(
         if inst is None:
             raise HTTPException(status_code=404, detail=f"未知仪器: {host}")
         safe_name = Path(filename).name
-        path = instrument_dir(cfg, inst) / safe_name
-        if not path.is_file():
-            raise HTTPException(status_code=404, detail=f"文件不存在: {safe_name}")
         if not cfg.matches_filename(safe_name):
             raise HTTPException(status_code=400, detail="文件不符合过滤规则")
+        path = find_local_n42(cfg, inst, safe_name)
+        if path is None:
+            raise HTTPException(status_code=404, detail=f"文件不存在: {safe_name}")
         return JSONResponse(_spectrum_payload(path))
 
     @app.get("/api/search")
@@ -192,7 +192,12 @@ def create_app(
         used_names: set[str] = set()
         with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             for inst, path, _data in matches:
-                arcname = f"{inst.host}/{path.name}"
+                # Preserve month folder when present (data/<ip>/YYYY-MM/*.n42).
+                month = path.parent.name
+                if len(month) == 7 and month[4] == "-":
+                    arcname = f"{inst.host}/{month}/{path.name}"
+                else:
+                    arcname = f"{inst.host}/{path.name}"
                 if arcname in used_names:
                     # Extremely unlikely same host+name; still avoid collision.
                     arcname = f"{inst.host}/{path.stem}_{len(used_names)}{path.suffix}"

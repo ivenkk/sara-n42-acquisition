@@ -11,7 +11,8 @@ from sara_n42.config import load_config
 
 
 def _seed_sample(cfg, fixtures_dir: Path, host: str, filename: str) -> None:
-    dest = cfg.storage_root / host
+    # Fixture StartTime is 2026-11-20 → month folder 2026-11
+    dest = cfg.storage_root / host / "2026-11"
     dest.mkdir(parents=True, exist_ok=True)
     sample = (fixtures_dir / "sample_5min.n42").read_bytes()
     (dest / filename).write_bytes(sample)
@@ -128,7 +129,7 @@ def test_api_search_count_and_zip(sample_config: Path, fixtures_dir: Path):
     assert r.headers["content-type"].startswith("application/zip")
     with zipfile.ZipFile(io.BytesIO(r.content)) as zf:
         names = zf.namelist()
-        assert names == ["192.168.4.136/demo_5min.n42"]
+        assert names == ["192.168.4.136/2026-11/demo_5min.n42"]
 
     r = client.get(
         "/api/search/download",
