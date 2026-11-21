@@ -1,13 +1,17 @@
 (() => {
   const hostSelect = document.getElementById("instrument");
-  const startInput = document.getElementById("start");
-  const endInput = document.getElementById("end");
+  const startDate = document.getElementById("start-date");
+  const startTime = document.getElementById("start-time");
+  const endDate = document.getElementById("end-date");
+  const endTime = document.getElementById("end-time");
   const btnSearch = document.getElementById("btn-search");
   const btnDownload = document.getElementById("btn-download");
   const hint = document.getElementById("search-hint");
   const countEl = document.getElementById("search-count");
   const errorEl = document.getElementById("search-error");
   const statusLine = document.getElementById("status-line");
+
+  const TIME_24H = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 
   let lastQuery = null;
 
@@ -19,26 +23,49 @@
     return String(n).padStart(2, "0");
   }
 
-  function toLocalInputValue(d) {
-    return (
-      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
-      `T${pad(d.getHours())}:${pad(d.getMinutes())}`
-    );
+  function splitLocal(d) {
+    return {
+      date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+      time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+    };
+  }
+
+  function normalizeTimeInput(el) {
+    let v = (el.value || "").trim().replace(/\./g, ":").replace(/\s+/g, "");
+    if (/^\d{3,4}$/.test(v)) {
+      v = v.padStart(4, "0");
+      v = `${v.slice(0, 2)}:${v.slice(2)}`;
+    }
+    el.value = v;
+    return v;
+  }
+
+  function combineDateTime(dateEl, timeEl, label) {
+    const date = (dateEl.value || "").trim();
+    const time = normalizeTimeInput(timeEl);
+    if (!date || !time) {
+      throw new Error(`请填写${label}的日期与时间（24小时制 HH:MM）`);
+    }
+    if (!TIME_24H.test(time)) {
+      throw new Error(`${label}时间须为 24 小时制 HH:MM（例如 09:30 或 18:05）`);
+    }
+    return `${date}T${time}`;
   }
 
   function initDefaults() {
     const end = new Date();
     const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
-    startInput.value = toLocalInputValue(start);
-    endInput.value = toLocalInputValue(end);
+    const s = splitLocal(start);
+    const e = splitLocal(end);
+    startDate.value = s.date;
+    startTime.value = s.time;
+    endDate.value = e.date;
+    endTime.value = e.time;
   }
 
   function queryParams() {
-    const start = startInput.value;
-    const end = endInput.value;
-    if (!start || !end) {
-      throw new Error("请填写起止测量时间");
-    }
+    const start = combineDateTime(startDate, startTime, "起始");
+    const end = combineDateTime(endDate, endTime, "结束");
     const params = new URLSearchParams({ start, end });
     const host = hostSelect.value;
     if (host) params.set("host", host);
@@ -102,13 +129,19 @@
     window.location.href = url;
   }
 
+  function invalidateDownload() {
+    btnDownload.disabled = true;
+    lastQuery = null;
+  }
+
   btnSearch.addEventListener("click", () => runSearch());
   btnDownload.addEventListener("click", () => runDownload());
-  [startInput, endInput, hostSelect].forEach((el) => {
-    el.addEventListener("change", () => {
-      btnDownload.disabled = true;
-      lastQuery = null;
-    });
+  [startDate, startTime, endDate, endTime, hostSelect].forEach((el) => {
+    el.addEventListener("change", invalidateDownload);
+    el.addEventListener("input", invalidateDownload);
+  });
+  [startTime, endTime].forEach((el) => {
+    el.addEventListener("blur", () => normalizeTimeInput(el));
   });
 
   initDefaults();

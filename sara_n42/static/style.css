@@ -83,18 +83,40 @@ body {
 }
 
 .controls label,
-.field label {
+.field label,
+.field-label {
   color: var(--muted);
   font-size: 0.9rem;
 }
 
-select, button, input[type="datetime-local"] {
+select,
+button,
+input[type="date"],
+input[type="text"].time-24h {
   font: inherit;
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 0.4rem 0.7rem;
   background: var(--panel);
   color: var(--ink);
+}
+
+.datetime-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.datetime-row input[type="date"] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.datetime-row input.time-24h {
+  flex: 0 0 5.5rem;
+  width: 5.5rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
 }
 
 button {

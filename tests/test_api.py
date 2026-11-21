@@ -54,6 +54,12 @@ def test_api_files_and_spectrum(sample_config: Path, fixtures_dir: Path):
     r = client.get("/search")
     assert r.status_code == 200
     assert "检索下载" in r.text
+    assert 'id="start-date"' in r.text
+    assert 'id="start-time"' in r.text
+    assert 'id="end-date"' in r.text
+    assert 'id="end-time"' in r.text
+    assert 'class="time-24h"' in r.text
+    assert 'type="datetime-local"' not in r.text
 
 
 def test_api_spectra_latest(sample_config: Path, fixtures_dir: Path):

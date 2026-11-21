@@ -30,12 +30,42 @@
         </select>
       </div>
       <div class="field">
-        <label for="start">测量时间起</label>
-        <input type="datetime-local" id="start" required />
+        <span class="field-label" id="start-label">测量时间起</span>
+        <div class="datetime-row" role="group" aria-labelledby="start-label">
+          <input type="date" id="start-date" required aria-label="起始日期" />
+          <input
+            type="text"
+            id="start-time"
+            class="time-24h"
+            required
+            inputmode="numeric"
+            placeholder="HH:MM"
+            pattern="(?:[01]\d|2[0-3]):[0-5]\d"
+            maxlength="5"
+            autocomplete="off"
+            title="24小时制，例如 14:30"
+            aria-label="起始时间（24小时制）"
+          />
+        </div>
       </div>
       <div class="field">
-        <label for="end">测量时间止</label>
-        <input type="datetime-local" id="end" required />
+        <span class="field-label" id="end-label">测量时间止</span>
+        <div class="datetime-row" role="group" aria-labelledby="end-label">
+          <input type="date" id="end-date" required aria-label="结束日期" />
+          <input
+            type="text"
+            id="end-time"
+            class="time-24h"
+            required
+            inputmode="numeric"
+            placeholder="HH:MM"
+            pattern="(?:[01]\d|2[0-3]):[0-5]\d"
+            maxlength="5"
+            autocomplete="off"
+            title="24小时制，例如 14:30"
+            aria-label="结束时间（24小时制）"
+          />
+        </div>
       </div>
       <div class="field actions">
         <button type="button" id="btn-search">检索</button>
@@ -44,7 +74,7 @@
     </section>
 
     <section class="search-result" aria-live="polite">
-      <p id="search-hint" class="muted">选择时间范围后检索。结果只显示匹配数量，不列出文件名。</p>
+      <p id="search-hint" class="muted">选择日期与 24 小时制时间（HH:MM）后检索。结果只显示匹配数量，不列出文件名。</p>
       <p id="search-count" class="count hidden"></p>
       <p id="search-error" class="error hidden"></p>
     </section>
