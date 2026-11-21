@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+import zipfile
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -8,12 +10,17 @@ from sara_n42.app import create_app
 from sara_n42.config import load_config
 
 
+def _seed_sample(cfg, fixtures_dir: Path, host: str, filename: str) -> None:
+    # Fixture StartTime is 2026-11-20 → month folder 2026-11
+    dest = cfg.storage_root / host / "2026-11"
+    dest.mkdir(parents=True, exist_ok=True)
+    sample = (fixtures_dir / "sample_5min.n42").read_bytes()
+    (dest / filename).write_bytes(sample)
+
+
 def test_api_files_and_spectrum(sample_config: Path, fixtures_dir: Path):
     cfg = load_config(sample_config)
-    dest = cfg.storage_root / "192.168.4.136"
-    dest.mkdir(parents=True)
-    sample = (fixtures_dir / "sample_5min.n42").read_bytes()
-    (dest / "demo_5min.n42").write_bytes(sample)
+    _seed_sample(cfg, fixtures_dir, "192.168.4.136", "demo_5min.n42")
 
     app = create_app(cfg, start_scheduler=False)
     client = TestClient(app)
@@ -27,7 +34,6 @@ def test_api_files_and_spectrum(sample_config: Path, fixtures_dir: Path):
     body = r.json()
     assert body["empty"] is False
     assert body["files"][0]["filename"] == "demo_5min.n42"
-    assert "未知" not in body["files"][0]["measurement_time"] or True
 
     r = client.get(
         "/api/spectrum",
@@ -42,3 +48,182 @@ def test_api_files_and_spectrum(sample_config: Path, fixtures_dir: Path):
     r = client.get("/")
     assert r.status_code == 200
     assert "SARA N42" in r.text
+    assert "实时能谱" in r.text
+    assert 'id="file-list"' not in r.text
+
+    r = client.get("/search")
+    assert r.status_code == 200
+    assert "检索下载" in r.text
+    assert 'id="start-date"' in r.text
+    assert 'id="start-time"' in r.text
+    assert 'id="end-date"' in r.text
+    assert 'id="end-time"' in r.text
+    assert 'class="time-24h"' in r.text
+    assert 'type="datetime-local"' not in r.text
+
+
+def test_api_spectra_latest(sample_config: Path, fixtures_dir: Path):
+    cfg = load_config(sample_config)
+    _seed_sample(cfg, fixtures_dir, "192.168.4.136", "demo_5min.n42")
+
+    app = create_app(cfg, start_scheduler=False)
+    client = TestClient(app)
+
+    r = client.get("/api/spectra/latest")
+    assert r.status_code == 200
+    items = r.json()["instruments"]
+    assert len(items) == 2
+    by_host = {i["host"]: i for i in items}
+    assert by_host["192.168.4.136"]["status"] == "online"
+    assert by_host["192.168.4.136"]["empty"] is False
+    assert by_host["192.168.4.136"]["spectrum"]["filename"] == "demo_5min.n42"
+    assert by_host["192.168.4.136"]["spectrum"]["dose_rate"] == 9.550e-02
+    assert by_host["192.168.4.136"]["spectrum"]["dose_rate_unit"] == "uSv/h"
+    assert by_host["192.168.4.136"]["spectrum"]["dose_rate_display"] == "9.550e-02 uSv/h"
+    assert by_host["192.168.4.137"]["status"] == "offline"
+    assert by_host["192.168.4.137"]["empty"] is True
+    assert by_host["192.168.4.137"]["spectrum"] is None
+
+
+def test_api_spectra_latest_offline_when_poll_fails(
+    sample_config: Path, fixtures_dir: Path
+):
+    """Poll failure marks instrument offline even if a local file exists."""
+    cfg = load_config(sample_config)
+    _seed_sample(cfg, fixtures_dir, "192.168.4.136", "demo_5min.n42")
+    _seed_sample(cfg, fixtures_dir, "192.168.4.137", "other_5min.n42")
+
+    app = create_app(cfg, start_scheduler=False)
+    # Simulate a completed poll cycle where .137 is unreachable.
+    app.state.scheduler.last_cycle_at = 1.0
+    app.state.scheduler.last_ok_hosts = {"192.168.4.136"}
+    app.state.scheduler.last_errors = {"192.168.4.137": "instrument down"}
+
+    client = TestClient(app)
+    r = client.get("/api/spectra/latest")
+    assert r.status_code == 200
+    by_host = {i["host"]: i for i in r.json()["instruments"]}
+    assert by_host["192.168.4.136"]["status"] == "online"
+    assert by_host["192.168.4.136"]["spectrum"] is not None
+    assert by_host["192.168.4.137"]["status"] == "offline"
+    assert by_host["192.168.4.137"]["spectrum"] is None
+    assert by_host["192.168.4.137"]["error"] == "instrument down"
+
+
+def test_api_spectra_latest_follows_config_reload(
+    sample_config: Path, fixtures_dir: Path
+):
+    """Hot-reload shrinks/grows the live panel list without restarting the app."""
+    import time
+
+    import yaml
+
+    cfg = load_config(sample_config)
+    _seed_sample(cfg, fixtures_dir, "192.168.4.136", "demo_5min.n42")
+
+    app = create_app(cfg, start_scheduler=False, watch_config=False)
+    client = TestClient(app)
+
+    r = client.get("/api/spectra/latest")
+    assert r.status_code == 200
+    assert len(r.json()["instruments"]) == 2
+
+    raw = yaml.safe_load(sample_config.read_text(encoding="utf-8"))
+    raw["instruments"] = [
+        {
+            "name": "SARA-1",
+            "host": "192.168.4.136",
+            "port": 80,
+            "username": "admin",
+            "password": "admin",
+        }
+    ]
+    time.sleep(0.05)
+    sample_config.write_text(yaml.safe_dump(raw, allow_unicode=True), encoding="utf-8")
+    try:
+        import os
+
+        now = time.time()
+        os.utime(sample_config, (now + 1, now + 1))
+    except OSError:
+        pass
+
+    assert app.state.config_store.check_and_reload() is True
+    assert len(app.state.scheduler.config.instruments) == 1
+
+    r = client.get("/api/spectra/latest")
+    assert r.status_code == 200
+    items = r.json()["instruments"]
+    assert len(items) == 1
+    assert items[0]["host"] == "192.168.4.136"
+
+    r = client.get("/api/instruments")
+    assert len(r.json()) == 1
+
+
+def test_api_search_count_and_zip(sample_config: Path, fixtures_dir: Path):
+    cfg = load_config(sample_config)
+    _seed_sample(cfg, fixtures_dir, "192.168.4.136", "demo_5min.n42")
+    _seed_sample(cfg, fixtures_dir, "192.168.4.137", "other_5min.n42")
+
+    app = create_app(cfg, start_scheduler=False)
+    client = TestClient(app)
+
+    # Fixture StartTime is 2026-11-20T12:00:00
+    r = client.get(
+        "/api/search",
+        params={
+            "start": "2026-11-20T00:00",
+            "end": "2026-11-20T23:59",
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["count"] == 2
+    assert body["by_host"]["192.168.4.136"] == 1
+    assert body["by_host"]["192.168.4.137"] == 1
+    assert "files" not in body
+
+    r = client.get(
+        "/api/search",
+        params={
+            "start": "2026-11-20T00:00",
+            "end": "2026-11-20T23:59",
+            "host": "192.168.4.136",
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["count"] == 1
+
+    r = client.get(
+        "/api/search",
+        params={
+            "start": "2026-11-21T00:00",
+            "end": "2026-11-21T23:59",
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["count"] == 0
+
+    r = client.get(
+        "/api/search/download",
+        params={
+            "start": "2026-11-20T00:00",
+            "end": "2026-11-20T23:59",
+            "host": "192.168.4.136",
+        },
+    )
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/zip")
+    with zipfile.ZipFile(io.BytesIO(r.content)) as zf:
+        names = zf.namelist()
+        assert names == ["192.168.4.136/2026-11/demo_5min.n42"]
+
+    r = client.get(
+        "/api/search/download",
+        params={
+            "start": "2026-11-21T00:00",
+            "end": "2026-11-21T23:59",
+        },
+    )
+    assert r.status_code == 404

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import io
 import logging
 import re
+import tarfile
 import tempfile
 import zipfile
 from pathlib import Path
@@ -161,10 +163,15 @@ class SaraSoapClient:
         """Call GetFileNames and return remote filenames (basename only)."""
         root = self._soap_post(_build_get_file_names_body(file_type))
         names: list[str] = []
-        for el in _find_all_by_local(root, "FileName"):
-            text = (el.text or "").strip()
-            if text:
-                names.append(Path(text).name)
+        # Live SARA firmware returns repeated <sara:FilesFound> elements.
+        # Older/docs variants may use <FileName> / <FileNames>.
+        for local_name in ("FilesFound", "FileName"):
+            for el in _find_all_by_local(root, local_name):
+                text = (el.text or "").strip()
+                if text:
+                    names.append(Path(text).name)
+            if names:
+                break
         # Some firmwares may return a single space-separated FileNames node
         if not names:
             blob = _find_text_by_local(root, "FileNames") or _find_text_by_local(
@@ -183,6 +190,9 @@ class SaraSoapClient:
 
         Returns paths of newly written files under ``dest_dir``.
         Never overwrites existing files in ``dest_dir``.
+
+        Live firmware returns ``/tmp/n42Files.tgz`` (gzip tar). Some docs /
+        fixtures use zip; both are supported.
         """
         if not filenames:
             return []
@@ -212,42 +222,25 @@ class SaraSoapClient:
         dest_dir.mkdir(parents=True, exist_ok=True)
 
         wanted = {name.lower(): name for name in filenames}
-        saved: list[Path] = []
+        pkg_lower = package.lower()
 
         is_zip = (
             "zip" in content_type
-            or package.lower().endswith(".zip")
+            or pkg_lower.endswith(".zip")
             or payload[:2] == b"PK"
+        )
+        is_tgz = (
+            "gzip" in content_type
+            or "x-tgz" in content_type
+            or "x-gtar" in content_type
+            or pkg_lower.endswith((".tgz", ".tar.gz", ".tar"))
+            or payload[:2] == b"\x1f\x8b"
         )
 
         if is_zip:
-            with tempfile.TemporaryDirectory(prefix="sara_n42_") as tmp:
-                zpath = Path(tmp) / "package.zip"
-                zpath.write_bytes(payload)
-                try:
-                    with zipfile.ZipFile(zpath, "r") as zf:
-                        for info in zf.infolist():
-                            if info.is_dir():
-                                continue
-                            base = Path(info.filename).name
-                            if base.lower() not in wanted:
-                                continue
-                            target = dest_dir / base
-                            if target.exists():
-                                logger.info(
-                                    "跳过已存在文件 %s @ %s",
-                                    base,
-                                    self.instrument.host,
-                                )
-                                continue
-                            with zf.open(info) as src, target.open("wb") as out:
-                                out.write(src.read())
-                            saved.append(target)
-                except zipfile.BadZipFile as exc:
-                    raise SaraSoapError(
-                        f"DownloadPackage 不是有效 zip ({self.instrument.host}): {exc}"
-                    ) from exc
-            return saved
+            return self._extract_wanted_from_zip(payload, dest_dir, wanted)
+        if is_tgz:
+            return self._extract_wanted_from_tarball(payload, dest_dir, wanted)
 
         # Single-file response: save under the first requested name if one file,
         # or try Content-Disposition filename.
@@ -264,8 +257,95 @@ class SaraSoapClient:
             return []
         if not target.name.lower().endswith(".n42"):
             raise SaraSoapError(
-                f"非 zip 响应且文件名不是 .n42: {target.name} ({self.instrument.host})"
+                f"非 zip/tgz 响应且文件名不是 .n42: {target.name} "
+                f"({self.instrument.host})"
             )
         target.write_bytes(payload)
-        saved.append(target)
+        return [target]
+
+    def _extract_wanted_from_zip(
+        self,
+        payload: bytes,
+        dest_dir: Path,
+        wanted: dict[str, str],
+    ) -> list[Path]:
+        saved: list[Path] = []
+        with tempfile.TemporaryDirectory(prefix="sara_n42_") as tmp:
+            zpath = Path(tmp) / "package.zip"
+            zpath.write_bytes(payload)
+            try:
+                with zipfile.ZipFile(zpath, "r") as zf:
+                    for info in zf.infolist():
+                        if info.is_dir():
+                            continue
+                        path = self._save_member_if_wanted(
+                            dest_dir,
+                            wanted,
+                            member_name=info.filename,
+                            data=zf.read(info),
+                        )
+                        if path is not None:
+                            saved.append(path)
+            except zipfile.BadZipFile as exc:
+                raise SaraSoapError(
+                    f"DownloadPackage 不是有效 zip ({self.instrument.host}): {exc}"
+                ) from exc
         return saved
+
+    def _extract_wanted_from_tarball(
+        self,
+        payload: bytes,
+        dest_dir: Path,
+        wanted: dict[str, str],
+    ) -> list[Path]:
+        """Live SARA returns ``/tmp/n42Files.tgz`` (gzip tar), not zip."""
+        saved: list[Path] = []
+        try:
+            try:
+                tf = tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz")
+            except tarfile.ReadError:
+                tf = tarfile.open(fileobj=io.BytesIO(payload), mode="r:*")
+            with tf:
+                for member in tf.getmembers():
+                    if not member.isfile():
+                        continue
+                    extracted = tf.extractfile(member)
+                    if extracted is None:
+                        continue
+                    path = self._save_member_if_wanted(
+                        dest_dir,
+                        wanted,
+                        member_name=member.name,
+                        data=extracted.read(),
+                    )
+                    if path is not None:
+                        saved.append(path)
+        except tarfile.TarError as exc:
+            raise SaraSoapError(
+                f"DownloadPackage 不是有效 tar/tgz ({self.instrument.host}): {exc}"
+            ) from exc
+        return saved
+
+    def _save_member_if_wanted(
+        self,
+        dest_dir: Path,
+        wanted: dict[str, str],
+        *,
+        member_name: str,
+        data: bytes,
+    ) -> Path | None:
+        base = Path(member_name).name
+        if base.lower() not in wanted:
+            return None
+        # Prefer the casing from the requested filename list.
+        base = wanted[base.lower()]
+        target = dest_dir / base
+        if target.exists():
+            logger.info(
+                "跳过已存在文件 %s @ %s",
+                base,
+                self.instrument.host,
+            )
+            return None
+        target.write_bytes(data)
+        return target

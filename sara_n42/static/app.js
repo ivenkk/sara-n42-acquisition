@@ -1,109 +1,69 @@
 (() => {
-  const hostSelect = document.getElementById("instrument");
-  const fileList = document.getElementById("file-list");
-  const fileEmpty = document.getElementById("file-empty");
-  const chartTitle = document.getElementById("chart-title");
-  const chartSubtitle = document.getElementById("chart-subtitle");
-  const chartError = document.getElementById("chart-error");
+  const grid = document.getElementById("spectra-grid");
+  const liveEmpty = document.getElementById("live-empty");
   const statusLine = document.getElementById("status-line");
   const btnRefresh = document.getElementById("btn-refresh");
   const autoRefresh = document.getElementById("auto-refresh");
 
-  const chart = echarts.init(document.getElementById("chart"));
-  let selectedFile = null;
-  let filesCache = [];
+  /** @type {Map<string, echarts.ECharts>} */
+  const charts = new Map();
 
   function setStatus(text) {
     statusLine.textContent = text;
   }
 
-  function currentHost() {
-    return hostSelect.value || "";
+  function ensureCard(host, name) {
+    let card = [...grid.querySelectorAll(".spectrum-card")].find(
+      (el) => el.dataset.host === host
+    );
+    if (card) return card;
+
+    card = document.createElement("section");
+    card.className = "spectrum-card";
+    card.dataset.host = host;
+    card.innerHTML = `
+      <div class="chart-meta">
+        <div class="inst-name"></div>
+        <div class="chart-title"></div>
+        <div class="chart-subtitle"></div>
+      </div>
+      <div class="chart" role="img" aria-label="能谱曲线图"></div>
+      <p class="empty-msg hidden"></p>
+      <p class="error hidden"></p>
+    `;
+    card.querySelector(".inst-name").textContent = `${name} · ${host}`;
+    grid.appendChild(card);
+
+    const chartEl = card.querySelector(".chart");
+    const chart = echarts.init(chartEl);
+    charts.set(host, chart);
+    return card;
   }
 
-  async function loadFiles({ keepSelection = true } = {}) {
-    const host = currentHost();
-    if (!host) {
-      fileList.innerHTML = "";
-      fileEmpty.classList.remove("hidden");
-      fileEmpty.textContent = "未配置仪器。请编辑 config.yaml 后重启。";
-      return;
-    }
-    setStatus(`正在加载 ${host} 的文件列表…`);
-    const resp = await fetch(`/api/files?host=${encodeURIComponent(host)}`);
-    if (!resp.ok) {
-      setStatus(`加载失败: HTTP ${resp.status}`);
-      return;
-    }
-    const data = await resp.json();
-    filesCache = data.files || [];
-    fileList.innerHTML = "";
+  function renderSpectrum(card, host, spectrum) {
+    const chart = charts.get(host);
+    const title = card.querySelector(".chart-title");
+    const subtitle = card.querySelector(".chart-subtitle");
+    const emptyMsg = card.querySelector(".empty-msg");
+    const err = card.querySelector(".error");
+    const chartEl = card.querySelector(".chart");
 
-    if (data.empty || filesCache.length === 0) {
-      fileEmpty.classList.remove("hidden");
-      fileEmpty.textContent = "该仪器尚无符合规则的本地文件。";
+    emptyMsg.classList.add("hidden");
+    chartEl.classList.remove("hidden");
+
+    title.textContent = spectrum.filename;
+    const doseDisplay = spectrum.dose_rate_display || "未知";
+    subtitle.textContent = `测量时间：${spectrum.measurement_time}　剂量率：${doseDisplay}`;
+
+    if (spectrum.error) {
       chart.clear();
-      chartTitle.textContent = "暂无能谱";
-      chartSubtitle.textContent = "";
-      chartError.classList.add("hidden");
-      selectedFile = null;
-      setStatus(`${host}：无本地文件`);
+      err.classList.remove("hidden");
+      err.textContent = spectrum.error;
       return;
     }
 
-    fileEmpty.classList.add("hidden");
-    for (const item of filesCache) {
-      const li = document.createElement("li");
-      li.dataset.filename = item.filename;
-      li.innerHTML =
-        `<div class="name"></div><div class="time"></div>`;
-      li.querySelector(".name").textContent = item.filename;
-      li.querySelector(".time").textContent = `测量时间：${item.measurement_time}`;
-      li.addEventListener("click", () => selectFile(item.filename));
-      fileList.appendChild(li);
-    }
-
-    const stillThere =
-      keepSelection &&
-      selectedFile &&
-      filesCache.some((f) => f.filename === selectedFile);
-    const next = stillThere ? selectedFile : filesCache[0].filename;
-    await selectFile(next);
-    setStatus(`${host}：${filesCache.length} 个文件`);
-  }
-
-  async function selectFile(filename) {
-    selectedFile = filename;
-    for (const li of fileList.querySelectorAll("li")) {
-      li.classList.toggle("active", li.dataset.filename === filename);
-    }
-    const host = currentHost();
-    chartTitle.textContent = filename;
-    chartSubtitle.textContent = "正在解析能谱…";
-    chartError.classList.add("hidden");
-
-    const url =
-      `/api/spectrum?host=${encodeURIComponent(host)}` +
-      `&filename=${encodeURIComponent(filename)}`;
-    const resp = await fetch(url);
-    if (!resp.ok) {
-      chart.clear();
-      chartError.classList.remove("hidden");
-      chartError.textContent = `加载失败: HTTP ${resp.status}`;
-      chartSubtitle.textContent = "";
-      return;
-    }
-    const data = await resp.json();
-    chartSubtitle.textContent = `测量时间：${data.measurement_time}`;
-
-    if (data.error) {
-      chart.clear();
-      chartError.classList.remove("hidden");
-      chartError.textContent = data.error;
-      return;
-    }
-
-    const points = data.channels.map((x, i) => [x, data.counts[i]]);
+    err.classList.add("hidden");
+    const points = spectrum.channels.map((x, i) => [x, spectrum.counts[i]]);
     chart.setOption(
       {
         animationDuration: 300,
@@ -111,13 +71,13 @@
         tooltip: { trigger: "axis" },
         xAxis: {
           type: "value",
-          name: data.x_label,
+          name: spectrum.x_label,
           nameLocation: "middle",
           nameGap: 28,
         },
         yAxis: {
           type: "value",
-          name: data.y_label,
+          name: spectrum.y_label,
           nameLocation: "middle",
           nameGap: 40,
         },
@@ -136,19 +96,95 @@
     );
   }
 
-  btnRefresh.addEventListener("click", () => loadFiles({ keepSelection: true }));
-  hostSelect.addEventListener("change", () => {
-    selectedFile = null;
-    loadFiles({ keepSelection: false });
+  function renderOffline(card, host) {
+    const chart = charts.get(host);
+    const title = card.querySelector(".chart-title");
+    const subtitle = card.querySelector(".chart-subtitle");
+    const emptyMsg = card.querySelector(".empty-msg");
+    const err = card.querySelector(".error");
+    const chartEl = card.querySelector(".chart");
+
+    card.classList.add("is-offline");
+    title.textContent = "不在线";
+    subtitle.textContent = "";
+    err.classList.add("hidden");
+    emptyMsg.classList.remove("hidden");
+    emptyMsg.textContent = "不在线";
+    chartEl.classList.add("hidden");
+    if (chart) {
+      try {
+        chart.clear();
+      } catch (_) {
+        /* chart may be disposed during refresh */
+      }
+    }
+  }
+
+  async function loadLatest() {
+    setStatus("正在加载各仪器最新能谱…");
+    const resp = await fetch("/api/spectra/latest");
+    if (!resp.ok) {
+      setStatus(`加载失败: HTTP ${resp.status}`);
+      return;
+    }
+    const data = await resp.json();
+    const items = data.instruments || [];
+
+    if (items.length === 0) {
+      liveEmpty.classList.remove("hidden");
+      grid.innerHTML = "";
+      charts.clear();
+      setStatus("未配置仪器");
+      return;
+    }
+
+    liveEmpty.classList.add("hidden");
+    const seen = new Set();
+    let onlineCount = 0;
+
+    for (const item of items) {
+      seen.add(item.host);
+      const card = ensureCard(item.host, item.name);
+      const offline =
+        item.status === "offline" || item.empty || !item.spectrum;
+      if (offline) {
+        renderOffline(card, item.host);
+      } else {
+        card.classList.remove("is-offline");
+        renderSpectrum(card, item.host, item.spectrum);
+        onlineCount += 1;
+      }
+    }
+
+    // Remove cards for instruments no longer configured
+    for (const card of [...grid.querySelectorAll(".spectrum-card")]) {
+      if (!seen.has(card.dataset.host)) {
+        const host = card.dataset.host;
+        const chart = charts.get(host);
+        if (chart) {
+          chart.dispose();
+          charts.delete(host);
+        }
+        card.remove();
+      }
+    }
+
+    for (const chart of charts.values()) {
+      chart.resize();
+    }
+
+    setStatus(`已更新：${onlineCount}/${items.length} 台在线`);
+  }
+
+  btnRefresh.addEventListener("click", () => loadLatest());
+  window.addEventListener("resize", () => {
+    for (const chart of charts.values()) chart.resize();
   });
-  window.addEventListener("resize", () => chart.resize());
 
   const intervalMs = (window.SARA_UI.pollIntervalSeconds || 300) * 1000;
   setInterval(() => {
-    if (autoRefresh.checked) {
-      loadFiles({ keepSelection: true });
-    }
+    if (autoRefresh.checked) loadLatest();
   }, intervalMs);
 
-  loadFiles({ keepSelection: false });
+  loadLatest();
 })();

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SARA N42 · 检索下载</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <h1>SARA N42</h1>
+      <p>检索下载</p>
+    </div>
+    <nav class="nav" aria-label="页面导航">
+      <a class="nav-link" href="/">实时能谱</a>
+      <a class="nav-link active" href="/search">检索下载</a>
+    </nav>
+  </header>
+
+  <main class="search-main" aria-label="按时间检索本地能谱">
+    <section class="search-form" aria-label="检索条件">
+      <div class="field">
+        <label for="instrument">仪器</label>
+        <select id="instrument" aria-label="选择仪器（可选）">
+          <option value="">全部仪器</option>
+          {% for inst in instruments %}
+          <option value="{{ inst.host }}">{{ inst.name }} ({{ inst.host }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <span class="field-label" id="start-label">测量时间起</span>
+        <div class="datetime-row" role="group" aria-labelledby="start-label">
+          <input type="date" id="start-date" required aria-label="起始日期" />
+          <input
+            type="text"
+            id="start-time"
+            class="time-24h"
+            required
+            inputmode="numeric"
+            placeholder="HH:MM"
+            pattern="(?:[01]\d|2[0-3]):[0-5]\d"
+            maxlength="5"
+            autocomplete="off"
+            title="24小时制，例如 14:30"
+            aria-label="起始时间（24小时制）"
+          />
+        </div>
+      </div>
+      <div class="field">
+        <span class="field-label" id="end-label">测量时间止</span>
+        <div class="datetime-row" role="group" aria-labelledby="end-label">
+          <input type="date" id="end-date" required aria-label="结束日期" />
+          <input
+            type="text"
+            id="end-time"
+            class="time-24h"
+            required
+            inputmode="numeric"
+            placeholder="HH:MM"
+            pattern="(?:[01]\d|2[0-3]):[0-5]\d"
+            maxlength="5"
+            autocomplete="off"
+            title="24小时制，例如 14:30"
+            aria-label="结束时间（24小时制）"
+          />
+        </div>
+      </div>
+      <div class="field actions">
+        <button type="button" id="btn-search">检索</button>
+        <button type="button" id="btn-download" disabled>下载 ZIP</button>
+      </div>
+    </section>
+
+    <section class="search-result" aria-live="polite">
+      <p id="search-hint" class="muted">选择日期与 24 小时制时间（HH:MM）后检索。结果只显示匹配数量，不列出文件名。</p>
+      <p id="search-count" class="count hidden"></p>
+      <p id="search-error" class="error hidden"></p>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span id="status-line">就绪</span>
+  </footer>
+
+  <script>
+    window.SARA_UI = { page: "search" };
+  </script>
+  <script src="/static/search.js"></script>
+</body>
+</html>

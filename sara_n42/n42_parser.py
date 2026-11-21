@@ -18,6 +18,7 @@ _START_TAGS = (
 _CHANNEL_DATA_TAGS = ("ChannelData",)
 _CAL_COEFF_TAGS = ("Coefficient",)
 _ENERGY_CAL_PARENTS = ("EnergyCalibration", "Calibration")
+_UNKNOWN = "未知"
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,9 @@ class SpectrumData:
     x_unit: str  # keV | channel
     x_label: str
     y_label: str = "计数 (counts)"
+    dose_rate: float | None = None
+    dose_rate_unit: str | None = None
+    dose_rate_display: str = _UNKNOWN
     error: str | None = None
 
 
@@ -149,10 +153,64 @@ def _apply_energy_cal(channels: list[float], coeffs: list[float]) -> list[float]
 
 def _format_time(dt: datetime | None) -> str:
     if dt is None:
-        return "未知"
+        return _UNKNOWN
     if dt.tzinfo is not None:
         return dt.isoformat(sep=" ", timespec="seconds")
     return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _attr_local(name: str) -> str:
+    return _local(name)
+
+
+def _dose_rate_unit(el: ET.Element) -> str | None:
+    """Build unit string from Units + optional TimeRelation (e.g. uSv + h → uSv/h)."""
+    units: str | None = None
+    time_relation: str | None = None
+    for key, value in el.attrib.items():
+        local = _attr_local(key)
+        if local == "Units" and value:
+            units = value.strip()
+        elif local == "TimeRelation" and value:
+            time_relation = value.strip()
+    if not units:
+        return None
+    if time_relation:
+        return f"{units}/{time_relation}"
+    return units
+
+
+def _parse_dose_rate(root: ET.Element) -> tuple[float | None, str | None, str]:
+    """
+    Extract gross dose rate from CountDoseData/DoseRate (SARA N42).
+
+    Live files use e.g. CountDoseData/DoseRate with Units="uSv"
+    and TimeRelation="h" (value like 9.550e-02 → unit uSv/h).
+    Nuclide-scoped sara:DoseRate values are ignored here.
+    """
+    for el in root.iter():
+        if _local(el.tag) != "CountDoseData":
+            continue
+        for child in el:
+            if _local(child.tag) != "DoseRate" or not child.text:
+                continue
+            text = child.text.strip()
+            if not text:
+                continue
+            # Gross dose rate is a single number; skip multi-value lists.
+            if re.search(r"[\s,;]", text):
+                continue
+            try:
+                value = float(text)
+            except ValueError:
+                continue
+            unit = _dose_rate_unit(child)
+            if unit:
+                display = f"{text} {unit}"
+            else:
+                display = text
+            return value, unit, display
+    return None, None, _UNKNOWN
 
 
 def parse_n42(path: Path | str) -> SpectrumData:
@@ -172,7 +230,7 @@ def parse_n42(path: Path | str) -> SpectrumData:
             filename=filename,
             path=str(path),
             measurement_time=None,
-            measurement_time_display="未知",
+            measurement_time_display=_UNKNOWN,
             measurement_time_source="unknown",
             channels=[],
             counts=[],
@@ -195,6 +253,8 @@ def parse_n42(path: Path | str) -> SpectrumData:
         if mt is not None:
             source = "filename"
 
+    dose_rate, dose_rate_unit, dose_rate_display = _parse_dose_rate(root)
+
     counts: list[float] = []
     for el in root.iter():
         if _local(el.tag) in _CHANNEL_DATA_TAGS and el.text:
@@ -213,6 +273,9 @@ def parse_n42(path: Path | str) -> SpectrumData:
             counts=[],
             x_unit="channel",
             x_label="道址 (channel)",
+            dose_rate=dose_rate,
+            dose_rate_unit=dose_rate_unit,
+            dose_rate_display=dose_rate_display,
             error="未找到 ChannelData 能谱数据",
         )
 
@@ -237,6 +300,9 @@ def parse_n42(path: Path | str) -> SpectrumData:
         counts=counts,
         x_unit=x_unit,
         x_label=x_label,
+        dose_rate=dose_rate,
+        dose_rate_unit=dose_rate_unit,
+        dose_rate_display=dose_rate_display,
         error=None,
     )
 

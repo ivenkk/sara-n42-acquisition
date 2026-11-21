@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import tempfile
 import threading
 import time
+from pathlib import Path
 from typing import Callable
 
 from .config import AppConfig
@@ -12,8 +14,8 @@ from .soap_client import SaraSoapClient, SaraSoapError
 from .storage import (
     append_download_log,
     ensure_storage_layout,
-    instrument_dir,
     local_basenames,
+    place_downloaded_n42,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,10 +34,11 @@ class AcquisitionScheduler:
         *,
         client_factory: Callable[..., SaraSoapClient] | None = None,
     ) -> None:
+        self._config_lock = threading.RLock()
         self.config = config
         self._client_factory = client_factory or (
             lambda inst: SaraSoapClient(
-                inst, timeout=config.request_timeout_seconds
+                inst, timeout=self.config.request_timeout_seconds
             )
         )
         self._stop = threading.Event()
@@ -43,6 +46,29 @@ class AcquisitionScheduler:
         self._lock = threading.Lock()
         self.last_cycle_at: float | None = None
         self.last_errors: dict[str, str] = {}
+        # Hosts that completed the last poll cycle without error.
+        self.last_ok_hosts: set[str] = set()
+
+    def update_config(self, config: AppConfig) -> None:
+        """Apply a hot-reloaded config; subsequent polls use the new instrument list."""
+        with self._config_lock:
+            self.config = config
+        ensure_storage_layout(config)
+        logger.info(
+            "调度器已切换到新配置：仪器数=%s，轮询间隔=%ss",
+            len(config.instruments),
+            config.poll_interval_seconds,
+        )
+
+    def is_reachable(self, host: str) -> bool | None:
+        """
+        Last-poll reachability for an instrument host.
+
+        Returns True/False after at least one cycle; None if never polled yet.
+        """
+        if self.last_cycle_at is None:
+            return None
+        return host in self.last_ok_hosts and host not in self.last_errors
 
     def start(self) -> None:
         ensure_storage_layout(self.config)
@@ -75,19 +101,25 @@ class AcquisitionScheduler:
                 self._cycle()
             except Exception:  # noqa: BLE001 — never kill the loop
                 logger.exception("轮询周期发生未捕获异常，将继续下一轮")
-            # Wait interruptibly
-            self._stop.wait(self.config.poll_interval_seconds)
+            # Wait interruptibly; interval comes from the live (possibly reloaded) config.
+            with self._config_lock:
+                interval = self.config.poll_interval_seconds
+            self._stop.wait(interval)
 
     def _cycle(self) -> None:
         with self._lock:
+            with self._config_lock:
+                cfg = self.config
             logger.info(
                 "开始一轮检查，仪器数=%s",
-                len(self.config.instruments),
+                len(cfg.instruments),
             )
             errors: dict[str, str] = {}
-            for inst in self.config.instruments:
+            ok_hosts: set[str] = set()
+            for inst in cfg.instruments:
                 try:
-                    self._process_instrument(inst)
+                    self._process_instrument(inst, cfg)
+                    ok_hosts.add(inst.host)
                 except Exception as exc:  # noqa: BLE001
                     msg = str(exc)
                     errors[inst.host] = msg
@@ -98,21 +130,23 @@ class AcquisitionScheduler:
                         msg,
                     )
                     append_download_log(
-                        self.config,
+                        cfg,
                         host=inst.host,
                         filename="*",
                         ok=False,
                         detail=msg,
                     )
             self.last_errors = errors
+            self.last_ok_hosts = ok_hosts
             self.last_cycle_at = time.time()
             logger.info("本轮检查结束")
 
-    def _process_instrument(self, inst) -> None:
+    def _process_instrument(self, inst, cfg: AppConfig | None = None) -> None:
+        config = cfg if cfg is not None else self.config
         client = self._client_factory(inst)
         try:
             remote_names = client.get_file_names(
-                file_type=self.config.file_extension
+                file_type=config.file_extension
             )
         except SaraSoapError:
             raise
@@ -122,9 +156,9 @@ class AcquisitionScheduler:
         filtered = [
             name
             for name in remote_names
-            if self.config.matches_filename(name)
+            if config.matches_filename(name)
         ]
-        existing = local_basenames(self.config, inst)
+        existing = local_basenames(config, inst)
         todo = [name for name in filtered if name not in existing]
 
         logger.info(
@@ -137,38 +171,44 @@ class AcquisitionScheduler:
         if not todo:
             return
 
-        dest = instrument_dir(self.config, inst)
-        try:
-            saved = client.download_files(todo, dest)
-        except SaraSoapError as exc:
-            append_download_log(
-                self.config,
-                host=inst.host,
-                filename=",".join(todo),
-                ok=False,
-                detail=str(exc),
-            )
-            raise
-
-        saved_names = {p.name for p in saved}
-        for name in todo:
-            if name in saved_names:
+        # Stage into a temp dir, then move each file into data/<ip>/YYYY-MM/.
+        with tempfile.TemporaryDirectory(prefix="sara_n42_dl_") as tmp:
+            staging = Path(tmp)
+            try:
+                saved = client.download_files(todo, staging)
+            except SaraSoapError as exc:
                 append_download_log(
-                    self.config, host=inst.host, filename=name, ok=True
+                    config,
+                    host=inst.host,
+                    filename=",".join(todo),
+                    ok=False,
+                    detail=str(exc),
                 )
-                logger.info("已保存 %s → %s", name, dest / name)
+                raise
+
+            placed_by_name: dict[str, Path] = {}
+            for staged in saved:
+                final = place_downloaded_n42(config, inst, staged)
+                placed_by_name[final.name] = final
+
+        existing_after = local_basenames(config, inst)
+        for name in todo:
+            if name in placed_by_name:
+                final = placed_by_name[name]
+                append_download_log(
+                    config, host=inst.host, filename=name, ok=True
+                )
+                logger.info("已保存 %s → %s", name, final)
+            elif name in existing_after:
+                logger.info("文件已存在，跳过 %s", name)
             else:
-                # Already existed or not present in package
-                if (dest / name).exists():
-                    logger.info("文件已存在，跳过 %s", name)
-                else:
-                    append_download_log(
-                        self.config,
-                        host=inst.host,
-                        filename=name,
-                        ok=False,
-                        detail="包中未找到该文件",
-                    )
-                    logger.error(
-                        "下载包中未找到 %s @ %s", name, inst.host
-                    )
+                append_download_log(
+                    config,
+                    host=inst.host,
+                    filename=name,
+                    ok=False,
+                    detail="包中未找到该文件",
+                )
+                logger.error(
+                    "下载包中未找到 %s @ %s", name, inst.host
+                )

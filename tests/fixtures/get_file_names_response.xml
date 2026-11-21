@@ -3,10 +3,10 @@
                     xmlns:sara="http://www.technidata.com/ENVINET/SARA">
   <SOAP-ENV:Body>
     <sara:GetFileNamesResponse>
-      <sara:FileName>ignore_1h_spectrum.n42</sara:FileName>
-      <sara:FileName>SARA_20261120_120000_5min.n42</sara:FileName>
-      <sara:FileName>notes.txt</sara:FileName>
-      <sara:FileName>other_5min_backup.n42</sara:FileName>
+      <sara:FilesFound>sara20449_1970-01-01T01_00_00Z-5min.n42</sara:FilesFound>
+      <sara:FilesFound>sara20449_1970-01-01T00_55_00Z-5min.n42</sara:FilesFound>
+      <sara:FilesFound>ignore_1h_spectrum.n42</sara:FilesFound>
+      <sara:FilesFound>other_5min_backup.n42</sara:FilesFound>
     </sara:GetFileNamesResponse>
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>
