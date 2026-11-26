@@ -77,6 +77,8 @@ def test_api_spectra_latest(sample_config: Path, fixtures_dir: Path):
     assert by_host["192.168.4.136"]["status"] == "online"
     assert by_host["192.168.4.136"]["empty"] is False
     assert by_host["192.168.4.136"]["spectrum"]["filename"] == "demo_5min.n42"
+    # Naive StartTime assumed UTC → Beijing (UTC+8)
+    assert by_host["192.168.4.136"]["spectrum"]["measurement_time"] == "2026-11-20 20:00:00"
     assert by_host["192.168.4.136"]["spectrum"]["dose_rate"] == 9.550e-02
     assert by_host["192.168.4.136"]["spectrum"]["dose_rate_unit"] == "uSv/h"
     assert by_host["192.168.4.136"]["spectrum"]["dose_rate_display"] == "9.550e-02 uSv/h"

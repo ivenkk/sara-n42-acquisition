@@ -7,7 +7,8 @@ def test_parse_n42_spectrum(fixtures_dir: Path):
     data = parse_n42(fixtures_dir / "sample_5min.n42")
     assert data.error is None
     assert data.measurement_time_source == "n42"
-    assert data.measurement_time_display.startswith("2026-11-20")
+    # Fixture StartTime 2026-11-20T12:00:00 is naive → assumed UTC → Beijing +8
+    assert data.measurement_time_display == "2026-11-20 20:00:00"
     assert len(data.counts) == 10
     assert data.x_unit == "keV"
     assert data.channels[1] == 1.5  # 0 + 1.5 * channel
@@ -39,6 +40,34 @@ def test_parse_n42_dose_rate_missing(tmp_path: Path):
     assert data.dose_rate_display == "未知"
 
 
+def test_parse_n42_dose_rate_normalized_scientific(tmp_path: Path):
+    """Plain decimal DoseRate values are normalized to scientific display."""
+    path = tmp_path / "decimal_dose.n42"
+    path.write_text(
+        """<?xml version="1.0" encoding="UTF-8"?>
+<N42InstrumentData xmlns="http://physics.nist.gov/N42/2011/N42"
+  xmlns:envinet="http://www.technidata.com/ENVINET">
+  <Measurement>
+    <Spectrum>
+      <StartTime>2026-11-20T12:00:00Z</StartTime>
+      <ChannelData>0 1 2</ChannelData>
+    </Spectrum>
+    <CountDoseData>
+      <DoseRate Units="uSv" envinet:TimeRelation="h">0.0955</DoseRate>
+    </CountDoseData>
+  </Measurement>
+</N42InstrumentData>
+""",
+        encoding="utf-8",
+    )
+    data = parse_n42(path)
+    assert data.error is None
+    assert data.dose_rate == 0.0955
+    assert data.dose_rate_display == "9.550e-02 uSv/h"
+    # Explicit UTC Z → same Beijing wall clock as naive-assumed-UTC fixture
+    assert data.measurement_time_display == "2026-11-20 20:00:00"
+
+
 def test_measurement_time_from_filename():
     dt = measurement_time_from_filename("SARA_20261120_120000_5min.n42")
     assert dt is not None
@@ -46,3 +75,23 @@ def test_measurement_time_from_filename():
     assert dt.month == 11
     assert dt.day == 20
     assert dt.hour == 12
+
+
+def test_filename_measurement_time_display_beijing(tmp_path: Path):
+    """Filename-only stamp (naive) is also shown in Beijing time."""
+    path = tmp_path / "SARA_20261120_120000_5min.n42"
+    path.write_text(
+        """<?xml version="1.0" encoding="UTF-8"?>
+<N42InstrumentData xmlns="http://physics.nist.gov/N42/2011/N42">
+  <Measurement>
+    <Spectrum>
+      <ChannelData>1 2 3</ChannelData>
+    </Spectrum>
+  </Measurement>
+</N42InstrumentData>
+""",
+        encoding="utf-8",
+    )
+    data = parse_n42(path)
+    assert data.measurement_time_source == "filename"
+    assert data.measurement_time_display == "2026-11-20 20:00:00"
