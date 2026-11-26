@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from xml.etree import ElementTree as ET
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 # Common N42.42 local names (namespace-agnostic)
 _START_TAGS = (
@@ -20,10 +20,22 @@ _CHANNEL_DATA_TAGS = ("ChannelData",)
 _CAL_COEFF_TAGS = ("Coefficient",)
 _ENERGY_CAL_PARENTS = ("EnergyCalibration", "Calibration")
 _UNKNOWN = "未知"
-# Display timezone for measurement times (Beijing / China Standard Time).
-_DISPLAY_TZ = ZoneInfo("Asia/Shanghai")
+# Fixed UTC+8 for Windows hosts without an IANA zone database (or tzdata).
+_BEIJING_FIXED = timezone(timedelta(hours=8))
 # Naive N42 / filename timestamps are treated as UTC (N42 convention).
 _NAIVE_ASSUMED_TZ = timezone.utc
+
+
+def _resolve_display_tz():
+    """Prefer Asia/Shanghai; fall back to fixed UTC+8 if the zone DB is missing."""
+    try:
+        return ZoneInfo("Asia/Shanghai")
+    except ZoneInfoNotFoundError:
+        return _BEIJING_FIXED
+
+
+# Display timezone for measurement times (Beijing / China Standard Time).
+_DISPLAY_TZ = _resolve_display_tz()
 
 
 @dataclass(frozen=True)
