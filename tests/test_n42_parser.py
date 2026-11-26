@@ -1,6 +1,17 @@
+from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
+from zoneinfo import ZoneInfoNotFoundError
 
-from sara_n42.n42_parser import measurement_time_from_filename, parse_n42
+from sara_n42 import n42_parser
+from sara_n42.n42_parser import (
+    _BEIJING_FIXED,
+    _format_time,
+    _resolve_display_tz,
+    _to_beijing,
+    measurement_time_from_filename,
+    parse_n42,
+)
 
 
 def test_parse_n42_spectrum(fixtures_dir: Path):
@@ -95,3 +106,19 @@ def test_filename_measurement_time_display_beijing(tmp_path: Path):
     data = parse_n42(path)
     assert data.measurement_time_source == "filename"
     assert data.measurement_time_display == "2026-11-20 20:00:00"
+
+
+def test_beijing_tz_falls_back_when_zoneinfo_unavailable():
+    """Windows without tzdata/IANA DB: ZoneInfoNotFoundError → fixed UTC+8."""
+
+    def _raise_missing(_key: str):
+        raise ZoneInfoNotFoundError("No time zone found with key Asia/Shanghai")
+
+    with patch.object(n42_parser, "ZoneInfo", side_effect=_raise_missing):
+        tz = _resolve_display_tz()
+    assert tz is _BEIJING_FIXED
+
+    utc_noon = datetime(2026, 11, 20, 12, 0, 0, tzinfo=timezone.utc)
+    with patch.object(n42_parser, "_DISPLAY_TZ", _BEIJING_FIXED):
+        assert _to_beijing(utc_noon).strftime("%Y-%m-%d %H:%M:%S") == "2026-11-20 20:00:00"
+        assert _format_time(datetime(2026, 11, 20, 12, 0, 0)) == "2026-11-20 20:00:00"
