@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from xml.etree import ElementTree as ET
+from zoneinfo import ZoneInfo
 
 # Common N42.42 local names (namespace-agnostic)
 _START_TAGS = (
@@ -19,6 +20,10 @@ _CHANNEL_DATA_TAGS = ("ChannelData",)
 _CAL_COEFF_TAGS = ("Coefficient",)
 _ENERGY_CAL_PARENTS = ("EnergyCalibration", "Calibration")
 _UNKNOWN = "未知"
+# Display timezone for measurement times (Beijing / China Standard Time).
+_DISPLAY_TZ = ZoneInfo("Asia/Shanghai")
+# Naive N42 / filename timestamps are treated as UTC (N42 convention).
+_NAIVE_ASSUMED_TZ = timezone.utc
 
 
 @dataclass(frozen=True)
@@ -151,12 +156,32 @@ def _apply_energy_cal(channels: list[float], coeffs: list[float]) -> list[float]
     return energies
 
 
+def _to_beijing(dt: datetime) -> datetime:
+    """Convert a parsed measurement time to Asia/Shanghai for display.
+
+    Aware datetimes keep their offset and are converted. Naive datetimes are
+    assumed to be UTC (N42/ISO convention for instrument StartTime and for
+    filename stamps that omit a zone), then converted to Beijing (UTC+8).
+    """
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_NAIVE_ASSUMED_TZ)
+    return dt.astimezone(_DISPLAY_TZ)
+
+
 def _format_time(dt: datetime | None) -> str:
+    """Format measurement time as Beijing wall clock ``YYYY-MM-DD HH:MM:SS``."""
     if dt is None:
         return _UNKNOWN
-    if dt.tzinfo is not None:
-        return dt.isoformat(sep=" ", timespec="seconds")
-    return dt.strftime("%Y-%m-%d %H:%M:%S")
+    return _to_beijing(dt).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _format_dose_rate(value: float, unit: str | None) -> str:
+    """Scientific notation: 3 mantissa digits, lowercase ``e``, signed exponent."""
+    # e.g. 9.550e-02 — matches Python format "{:.3e}"
+    sci = f"{value:.3e}"
+    if unit:
+        return f"{sci} {unit}"
+    return sci
 
 
 def _attr_local(name: str) -> str:
@@ -205,11 +230,7 @@ def _parse_dose_rate(root: ET.Element) -> tuple[float | None, str | None, str]:
             except ValueError:
                 continue
             unit = _dose_rate_unit(child)
-            if unit:
-                display = f"{text} {unit}"
-            else:
-                display = text
-            return value, unit, display
+            return value, unit, _format_dose_rate(value, unit)
     return None, None, _UNKNOWN
 
 
